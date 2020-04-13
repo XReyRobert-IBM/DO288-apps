@@ -5,16 +5,16 @@ pipeline {
     }
     agent {
       node {
-        //TODO: Add label for the Maven jenkins agent
+        // Add label for the Maven jenkins agent
+        label 'maven'
       }
     }
 
     environment {
-        //TODO: Customize these variables for your environment
-        DEV_PROJECT = "youruser-movies-dev"
-        STAGE_PROJECT = "youruser-movies-stage"
-        APP_GIT_URL = "https://github.com/youruser/DO288-apps"
-        NEXUS_SERVER = "http://nexus-common.apps.cluster.domain.example.com/repository/java"
+        // Customize these variables for your environment
+        DEV_PROJECT = "jm-tests-dev"
+        STAGE_PROJECT = "jm-tests-staging"
+        APP_GIT_URL = "https://github.com/jmereaux/DO288-apps"
 
         // DO NOT CHANGE THE GLOBAL VARS BELOW THIS LINE
         APP_NAME = "movies"
@@ -81,13 +81,42 @@ pipeline {
                       }
                     }
                 }
-                // TODO: Create a new OpenShift application based on the ${APP_NAME}:latest image stream
-                // TODO: Expose the ${APP_NAME} service for external access
+                // Create a new OpenShift application based on the ${APP_NAME}:latest image stream
+                script {
+                    sh '''
+                            oc new-app ${APP_NAME} -n ${DEV_PROJECT}
+                       '''
+                }
+
+                // Expose the ${APP_NAME} service for external access
+                echo '### Exposing the app in DEV env ###'
+                script {
+                    sh '''
+                            oc expose svc ${APP_NAME} -n ${DEV_PROJECT}
+                       '''
+                }
             }
         }
 
         stage('Wait for deployment in DEV env') {
-            //TODO: Watch deployment until pod is in 'Running' state
+            // Watch deployment until pod is in 'Running' state
+            steps {
+                sh "oc get route ${APP_NAME} -n ${DEV_PROJECT} -o jsonpath='{ .spec.host }' --loglevel=4 > routehost"
+
+                script {
+                    routeHost = readFile('routehost').trim()
+
+                    openshift.withCluster() {
+                        openshift.withProject( "${DEV_PROJECT}" ) {
+                            def deployment = openshift.selector("dc", "${APP_NAME}").rollout()
+                            openshift.selector("dc", "${APP_NAME}").related('pods').untilEach(1) {
+                                return (it.object().status.phase == "Running")
+                            }
+                        }
+                    echo "Deployment to Dev env is complete. Access the API endpoint at the URL http://${routeHost}/movies."
+                    }
+                } 
+            }
         }
 
         stage('Promote to Staging Env') {
@@ -97,7 +126,8 @@ pipeline {
                 }
                 script {
                     openshift.withCluster() {
-                    // TODO: Tag the ${APP_NAME}:latest image stream in the dev env as ${APP_NAME}:stage in staging
+                        // Tag the ${APP_NAME}:latest image stream in the dev env as ${APP_NAME}:stage in staging
+                        openshift.tag("${DEV_PROJECT}/movies:latest","${STAGE_PROJECT}/movies:stage")
                     }
                 }
             }
@@ -113,7 +143,12 @@ pipeline {
                    '''
 
                 echo '### Creating a new app in Staging ###'
-                // TODO: Create a new app in staging and expose the service
+                // Create a new app in staging and expose the service
+                sh '''
+                        oc project ${STAGE_PROJECT}
+                        oc new-app --name movies -i movies:stage
+                        oc expose svc ${APP_NAME}
+                   '''
             }
         }
 
