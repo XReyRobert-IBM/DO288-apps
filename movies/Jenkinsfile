@@ -84,7 +84,7 @@ pipeline {
                 // Create a new OpenShift application based on the ${APP_NAME}:latest image stream
                 script {
                     sh '''
-                            oc new-app ${APP_NAME} -n ${DEV_PROJECT}
+                            oc new-app --name ${APP_NAME} -i ${APP_NAME}:latest -n ${DEV_PROJECT}
                        '''
                 }
 
